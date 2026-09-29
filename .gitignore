@@ -1,3 +1,5 @@
 /**/*.log
 /rocm-metrics/
 /**/__pycache__/**/*
+/comfyui.zip
+/comfyui/comfyui.zip
