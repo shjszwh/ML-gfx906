@@ -25,6 +25,21 @@ rewrite_file() {
     "$f"
 }
 
+# 基础镜像自带的 gfx906 apt 源在国内会返回 403，apt-get update 会因此失败。
+# ComfyUI 这一层只安装 Ubuntu 软件包，ROCm 已经在基础镜像里，先移走该源。
+disable_unreachable_apt_sources() {
+  local f
+  mkdir -p /etc/apt/sources.disabled
+  shopt -s nullglob
+  for f in /etc/apt/sources.list.d/*; do
+    [ -f "$f" ] || continue
+    if grep -q 'arkprojects.space' "$f"; then
+      echo "disable apt source: $f"
+      mv "$f" "/etc/apt/sources.disabled/$(basename "$f")"
+    fi
+  done
+}
+
 shopt -s nullglob
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
   [ -f "$f" ] || continue
@@ -32,6 +47,7 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
     *.sources|*.list|*/sources.list) rewrite_file "$f" ;;
   esac
 done
+disable_unreachable_apt_sources
 
 cat >/etc/apt/apt.conf.d/99cn-timeout <<'EOF'
 Acquire::http::Timeout "30";

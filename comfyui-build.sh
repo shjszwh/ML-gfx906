@@ -108,7 +108,16 @@ if not req.is_file():
 PY
 
 cp "${ROOT}/scripts/apply-cn-mirrors.sh" "${STAGE}/apply-cn-mirrors.sh"
-cp "${ROOT}/comfyui/build-context/entrypoint.sh" "${STAGE}/comfy/entrypoint.sh"
+python3 - "${ROOT}/comfyui/build-context/entrypoint.sh" "${STAGE}/comfy/entrypoint.sh" <<'PY'
+import pathlib, sys
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+data = src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+if data.startswith(b"\xef\xbb\xbf"):
+    data = data[3:]
+if not data.startswith(b"#!"):
+    raise SystemExit(f"entrypoint 不是 shell 脚本: {src}")
+dst.write_bytes(data)
+PY
 cp "${ROOT}/comfyui/build-context/sitecustomize.py" "${STAGE}/comfy/sitecustomize.py"
 {
   printf '%s\n' '#!/bin/bash'

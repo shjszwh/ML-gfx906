@@ -26,14 +26,16 @@ RUN chmod +x /tmp/apply-cn-mirrors.sh \
        PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST}" \
        /tmp/apply-cn-mirrors.sh \
     && rm -f /tmp/apply-cn-mirrors.sh \
-    && if ! apt-get update; then \
-         echo "apt-get update failed, disable gfx906 repo and retry"; \
-         if [ -f /etc/apt/sources.list.d/gfx906.sources ]; then \
-           mv /etc/apt/sources.list.d/gfx906.sources /etc/apt/sources.list.d/gfx906.sources.disabled; \
+    && mkdir -p /etc/apt/sources.disabled \
+    && for f in /etc/apt/sources.list.d/*; do \
+         if [ -f "$f" ] && grep -q 'arkprojects.space' "$f"; then \
+           echo "disable apt source: $f"; \
+           mv "$f" "/etc/apt/sources.disabled/$(basename "$f")"; \
          fi; \
-         apt-get update; \
-       fi \
+       done \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
+         bash \
          ca-certificates \
          git \
          curl \
@@ -49,7 +51,8 @@ WORKDIR /comfyui
 COPY comfy/ /comfyui/
 COPY extra-pip.sh /tmp/extra-pip.sh
 
-RUN chmod +x /comfyui/entrypoint.sh /tmp/extra-pip.sh \
+RUN python3 -c 'from pathlib import Path; p=Path("/comfyui/entrypoint.sh"); d=p.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"); p.write_bytes(d[3:] if d.startswith(b"\xef\xbb\xbf") else d)' \
+    && chmod +x /comfyui/entrypoint.sh /tmp/extra-pip.sh \
     && python3 -m pip install huggingface_hub modelscope yq -r /comfyui/requirements.txt \
     && if [ -f /comfyui/manager_requirements.txt ]; then \
          python3 -m pip install -r /comfyui/manager_requirements.txt; \
@@ -57,4 +60,4 @@ RUN chmod +x /comfyui/entrypoint.sh /tmp/extra-pip.sh \
     && bash /tmp/extra-pip.sh \
     && rm -f /tmp/extra-pip.sh
 
-ENTRYPOINT ["/comfyui/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/comfyui/entrypoint.sh"]
