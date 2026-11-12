@@ -62,6 +62,21 @@ After 5739 is merged, point `STRATA_REPO` back at
 `https://github.com/Niko1221/Strata.git` and set `STRATA_COMMIT` to the
 merged commit. Keep `STRATA_BUILD_DSV41=1`.
 
+### CI
+
+[`.github/workflows/strata-dsv41-build.yaml`](../.github/workflows/strata-dsv41-build.yaml)
+builds this image. It runs on a push to the `strata-deepseek41` branch, and
+can also be dispatched by hand; set `force_build` to rebuild an image that is
+already published. The `strata_tag` input overrides `STRATA_BRANCH`, which
+otherwise stays on `gfx906-dsv41`.
+
+The preset is a local shell snippet that CI never loads, so the workflow
+repeats its values in `env`. It needs no secret: with no Docker Hub
+credentials the login step falls back to GHCR, and the image is pushed to
+`ghcr.io/<fork-owner>/strata-gfx906`. Without a tag on the checked-out commit
+the build is not a release, so the only tag it writes is
+`deepseek41-rocm-10.1-<sha>-pre`.
+
 ## Run
 
 The entrypoint is `gfx906-entrypoint.sh`. It stamps `"backend": "hip"` onto a
