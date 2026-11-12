@@ -7,7 +7,7 @@
 export STRATA_ROCM_VERSION="10.1"
 export STRATA_REPO="https://github.com/shjszwh/mi50-Strata.git"
 export STRATA_BRANCH="gfx906-dsv41"
-export STRATA_COMMIT="9898718423ed1f319730fc65bac9a11a17c49988"
+export STRATA_COMMIT="5755523109403cbdee27e4da58e6398a782df871"
 export STRATA_PATCH="empty.patch"
 export STRATA_BUILD_DSV41="1"
 export STRATA_PRESET_NAME="deepseek41-rocm-${STRATA_ROCM_VERSION}"

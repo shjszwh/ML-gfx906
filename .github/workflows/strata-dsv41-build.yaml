@@ -33,7 +33,7 @@ jobs:
       STRATA_ROCM_VERSION: "10.1"
       # Falls back to the pinned branch for push events, where inputs is empty.
       STRATA_BRANCH: "${{ inputs.strata_tag || 'gfx906-dsv41' }}"
-      STRATA_COMMIT: "9898718423ed1f319730fc65bac9a11a17c49988"
+      STRATA_COMMIT: "5755523109403cbdee27e4da58e6398a782df871"
       STRATA_PATCH: "empty.patch"
       STRATA_BUILD_DSV41: "1"
       STRATA_PRESET_NAME: "deepseek41-rocm-10.1"

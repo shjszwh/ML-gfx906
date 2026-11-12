@@ -32,7 +32,13 @@ Upstream Strata skips `strata-dsv41` on gfx906 until
 [pull request 5739](https://github.com/Niko1221/Strata/pull/5739) is merged.
 Until then, source the preset. It clones `shjszwh/mi50-Strata` branch
 `gfx906-dsv41` and checks out commit
-`9898718423ed1f319730fc65bac9a11a17c49988`.
+`5755523109403cbdee27e4da58e6398a782df871`.
+
+That commit carries one fix: the MMQ entry point used to be probed with
+`__has_include("mmid.cuh")`, but the pinned llama.cpp `3cf03257` ships that
+header and still has the 4-argument API, so `src/prefill/moe_mmq.cu` failed
+to compile. CMake now reads the `mmq.cuh` signature instead and passes
+`STRATA_MMQ_TILE_SPEC_API` to the sources.
 
 ```bash
 . preset.deepseek41-rocm-10.1.sh
@@ -55,8 +61,8 @@ builds both `strata` and `strata-dsv41`. `FAMILY` then selects which one
 llama.cpp still comes from `setup.get_llama_cpp()` (the tree's pin
 `3cf03257`). The engine that was run on MI50 used llama.cpp `cd4ed902`
 instead. That tree reports `GGML_TYPE_COUNT` 44, and the trellis overlay
-anchors on 43, so the overlay stays off. MMQ on that tree needs
-`__has_include("mmid.cuh")`, which the fork already has.
+anchors on 43, so the overlay stays off. Which MMQ entry points to call
+now comes from the signature probe described above, so both trees work.
 
 After 5739 is merged, point `STRATA_REPO` back at
 `https://github.com/Niko1221/Strata.git` and set `STRATA_COMMIT` to the
