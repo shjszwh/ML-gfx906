@@ -1,0 +1,20 @@
+# llama.cpp multiruntime
+
+A single llama.cpp image with CPU, RPC, ROCm (gfx906), and CUDA (sm120) backends.
+
+The [ROCm llama.cpp image](../llama.cpp/README.md) provides the application and
+CPU/RPC/HIP backends. The CUDA backend and its runtime libraries are copied from
+the CUDA llama.cpp image. Both source images must contain compatible llama.cpp
+builds; the NVIDIA driver is provided by the container runtime.
+
+## Build
+
+Requires Docker with buildx and access to both source images. Select a preset
+and build:
+
+```bash
+. ./llama.cpp-multiruntime/preset.v0.6.0-rocm-7.14-cuda-13.4.2.sh
+./llama.cpp-multiruntime/build-and-push.image.sh
+```
+
+The build log is saved to `./logs/build_<timestamp>.log`.

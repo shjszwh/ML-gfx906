@@ -13,7 +13,8 @@ ARG CCACHE_MAXSIZE="2G"
 FROM ${ROCM_IMAGE} AS rocm_base
 # Install basic utilities and Python
 RUN apt-get update && \
-    apt-get install -y curl libgomp1 git python3 python3-venv python3-pip numactl && \
+    apt-get install -y --no-install-recommends ffmpeg curl libgomp1 git python3 python3-venv python3-pip numactl && \
+    rm -rf /var/lib/apt/lists/* && \
     pip3 config set global.break-system-packages true && \
     true
 
@@ -45,16 +46,18 @@ EOF_DOCKERFILE
 COPY ./patch/${LLAMACPP_PATCH} ./${LLAMACPP_PATCH}
 RUN git apply ./${LLAMACPP_PATCH} --allow-empty && rm ./${LLAMACPP_PATCH}
 
-FROM files_llamacpp AS files_llamacpp_python
-WORKDIR /files/llamacpp-python
-RUN cp -r /files/llamacpp/requirements.txt /files/llamacpp/requirements /files/llamacpp/gguf-py /files/llamacpp/*.py /files/llamacpp-python
-RUN find .
-
 ############# Build #############
 FROM rocm_base AS build_llamacpp
 ARG CMAKE_HIP_FLAGS
 ARG CCACHE_MAXSIZE
-RUN apt-get install -y build-essential cmake libssl-dev ccache
+RUN apt-get update && apt-get install -y build-essential cmake libssl-dev ccache
+
+# build router child wrapper
+COPY /extra/child-wrapper/spawn-hook.c /build/child-wrapper/spawn-hook.c
+RUN cc -O2 -Wall -Wextra -Werror -shared -fPIC \
+    /build/child-wrapper/spawn-hook.c -o /build/child-wrapper/spawn-hook.so -ldl
+
+# build llama.cpp
 COPY --from=files_llamacpp /files/llamacpp /build/llamacpp
 WORKDIR /build/llamacpp
 
@@ -77,6 +80,7 @@ CMAKE_ARGS=(
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
   # BACKEND
   -DGGML_BACKEND_DL=ON
+  -DGGML_NATIVE=OFF
   # BACKEND: HIP
   -DGGML_HIP=ON
   -DGGML_HIP_GRAPHS=ON
@@ -87,29 +91,24 @@ CMAKE_ARGS=(
   -DGGML_RPC=ON
   # BACKEND: CPU
   -DGGML_CPU_ALL_VARIANTS=ON
-  -DGGML_AVX512=ON
-  -DGGML_AVX512_VBMI=ON
-  -DGGML_AVX512_VNNI=ON
-  -DGGML_AVX512_BF16=ON
 )
 
 cmake -S . -B build "\${CMAKE_ARGS[@]}"
 cmake --build build --config Release -j$(nproc)
 EOF_DOCKERFILE
-RUN mkdir -p /builded && cp -r ./build/bin/* .devops/tools.sh /builded
+RUN mkdir -p /builded && cp -r /build/child-wrapper ./build/bin/* .devops/tools.sh /builded
 
 ############# Copy and install all #############
 FROM rocm_base AS final
 WORKDIR /app
-COPY --from=files_llamacpp_python /files/llamacpp-python /app
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 COPY /extra/requirements-extra.txt /app/requirements-extra.txt
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip3 install -r requirements.txt -r requirements-extra.txt && \
-    pip3 install --upgrade setuptools huggingface_hub && \
-    pip3 cache purge && \
-    true
+RUN pip3 install -r requirements-extra.txt && pip3 cache purge
+
 COPY --from=build_llamacpp /builded/ /app
 COPY /extra/ /app
+
 ENTRYPOINT ["/app/entrypoint.sh"]

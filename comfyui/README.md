@@ -6,27 +6,18 @@ graph/nodes interface. https://github.com/Comfy-Org/ComfyUI
 All images are built for the deprecated `gfx906` GPU architecture and are
 **not** compatible with other AMD GPUs.
 
-## Dependencies
-
-The image is built on top of the [PyTorch image](../pytorch/README.md), which
-itself is based on the [ROCm image](../rocm/README.md):
-
-```mermaid
-flowchart LR
-  rocm[docker.io/mixa3607/rocm-gfx906] --> torch[docker.io/mixa3607/pytorch-gfx906]
-  torch --> comfyui[docker.io/mixa3607/comfyui-gfx906]
-```
-
-`ComfyUI` is cloned from the upstream repo at build time (pinned to a git tag),
-so the base ROCm/PyTorch versions are fixed per image tag.
-
 ## Prebuilt images
 
-- [`docker.io/mixa3607/comfyui-gfx906:<ver>-rocm-7.14`](https://hub.docker.com/r/mixa3607/comfyui-gfx906/tags?name=rocm-7.14)\*
+- [`docker.io/mixa3607/comfyui-gfx906:<ver>-rocm-10.1`](https://hub.docker.com/r/mixa3607/comfyui-gfx906/tags?name=rocm-10.1)\*
 
 > \* have daily builds. See last tag on Docker Hub.
 
 ## Run
+
+### ROCm 7.14+ compatibility
+
+**ComfyUI v0.34.0 and newer require `--disable-dynamic-vram` on gfx906 with
+ROCm 7.14 or newer.**
 
 ### Docker
 
@@ -39,16 +30,22 @@ docker run --rm \
   -p 8188:8188 \
   -e PERSISTENCE_PATH=/data \
   -v $(pwd)/data:/data \
-  docker.io/mixa3607/comfyui-gfx906:<ver>-rocm-7.14
+   docker.io/mixa3607/comfyui-gfx906:latest-rocm-10.1 \
+  --disable-dynamic-vram
 ```
 
 Environment variables:
 
-| Variable           | Description                                                                 |
-| ------------------ | --------------------------------------------------------------------------- |
-| `PERSISTENCE_PATH` | Copy `models`, `custom_nodes`, `input`, `output` there; use it as `--base-directory` and store the SQLite DB |
-| `VENV_NAME`        | Create/activate a virtual environment (with `--system-site-packages`) at `/data/<venv>` (with persistence) or `/comfyui/<venv>` |
-| `BOOTSTRAP_ONLY`   | Set to `1` to only prepare persistence/venv and exit without starting ComfyUI |
+| Variable                                 | Description                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `PERSISTENCE_PATH`                       | Copy `models`, `custom_nodes`, `input`, `output` there; use it as `--base-directory` and store the SQLite DB                       |
+| `VENV_NAME`                              | Create/activate a virtual environment (with `--system-site-packages`) at `/data/<venv>` (with persistence) or `/comfyui/<venv>`    |
+| `BOOTSTRAP_ONLY`                         | Set to `1` to only prepare persistence/venv and exit without starting ComfyUI                                                      |
+| `PYTORCH_TUNABLEOP_ENABLED`              | Default `1`: use saved TunableOp algorithm selections when available                                                               |
+| `PYTORCH_TUNABLEOP_TUNING`               | Default `0`: do not search for new algorithms; set to `1` for a tuning session                                                     |
+| `PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED`    | Default `0`: exclude hipBLASLt candidates, whose installed kernels do not support gfx906                                           |
+| `PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE` | Default `0`: disabled because cause exceptions on gfx906                                                                           |
+| `PYTORCH_TUNABLEOP_FILENAME`             | Default `/data/tunableop_results.csv`: base path for persistent tuning results; PyTorch adds the visible GPU ordinal before `.csv` |
 
 Behavior:
 
@@ -64,116 +61,84 @@ Also see https://github.com/hartmark/sd-rocm/blob/main/docker-compose.yml
 
 Helm chart and samples: [mixa3607 charts](https://github.com/mixa3607/charts)
 
+## TunableOp performance tuning
+
+PyTorch TunableOp benchmarks alternative rocBLAS algorithms for GEMM/BMM
+(matrix multiplication) and records the fastest valid selection for each
+operation signature. It can **reduce sampling time by 30% or more** on
+matrix-heavy workloads: a tested MI50 Anima workflow went from approximately
+150s to 100s with the same model and 40 sampling steps. This is a measured
+example, not a guaranteed improvement for every model or workflow. Algorithm
+changes can introduce small floating-point differences; results need not be
+bit-identical.
+
+### Generate and accumulate results
+
+The image does not bundle a pre-tuned CSV. Mount a writable persistent `/data`
+volume and temporarily override `PYTORCH_TUNABLEOP_TUNING=1`:
+
+```bash
+docker run --rm \
+  --device=/dev/kfd --device=/dev/dri \
+  --group-add video --group-add render \
+  -p 8188:8188 \
+  -e PERSISTENCE_PATH=/data \
+  -e PYTORCH_TUNABLEOP_TUNING=1 \
+  -v $(pwd)/data:/data \
+   docker.io/mixa3607/comfyui-gfx906:latest-rocm-10.1 \
+  --disable-dynamic-vram
+```
+
+Run representative workflows with the models, resolutions and batch sizes you
+intend to use. New signatures trigger an algorithm search, so initial runs can
+be much slower than normal inference. Existing signatures from a successfully
+loaded CSV reuse their saved selections instead of being tuned again. Other
+sizes, strides or dtypes may produce new signatures and extend the results.
+
+After the workflows finish, shut down ComfyUI normally so results are written;
+do not force-kill the process. For visible GPU 0, the output is
+`/data/tunableop_results0.csv` (`./data/tunableop_results0.csv` on the host in
+the example above). Keep the environment variable **without** the GPU suffix:
+`PYTORCH_TUNABLEOP_FILENAME=/data/tunableop_results.csv`. The ordinal is the
+process-visible device index, not necessarily the physical GPU number.
+
 ## Build from source
 
 The build happens inside `docker buildx` on top of the PyTorch base image
 (`docker.io/mixa3607/pytorch-gfx906:<torch>-rocm-<rocm>`) and produces the
 ComfyUI image.
 
-| Artifact | Script                    | Dockerfile               |
-| -------- | ------------------------- | ------------------------ |
+| Artifact | Script                      | Dockerfile                 |
+| -------- | --------------------------- | -------------------------- |
 | Image    | `./build-and-push.image.sh` | `./build-image.Dockerfile` |
 
-### Prerequisites
-
-- Docker with the `buildx` plugin
-- Access to the PyTorch base image (see the [pytorch subproject](../pytorch/README.md))
-
-### Presets
-
-Preset files set the ComfyUI, PyTorch and ROCm versions. Source one, then run
-the build script:
-
 ```bash
-. preset.v0.30.0-rocm-7.14.sh
-./build-and-push.image.sh
-```
-
-To update the preset to the latest ComfyUI release, run `./upd2last-release.sh`.
-
-### Build variables
-
-Defaults come from [`env.sh`](./env.sh) and [`../env.sh`](../env.sh). Export
-any variable to override it.
-
-| Variable                 | Default                             | Description                                  |
-| ------------------------ | ----------------------------------- | -------------------------------------------- |
-| `COMFYUI_IMAGE`          | `docker.io/mixa3607/comfyui-gfx906` | Destination image name                       |
-| `COMFYUI_TORCH_IMAGE`    | `docker.io/mixa3607/pytorch-gfx906` | PyTorch base image name                      |
-| `COMFYUI_ROCM_VERSION`   | `6.3.3`                             | ROCm version of the base image               |
-| `COMFYUI_PYTORCH_VERSION`| `2.7.1`                             | PyTorch version of the base image            |
-| `COMFYUI_REPO`           | `https://github.com/Comfy-Org/ComfyUI.git` | ComfyUI git repository               |
-| `COMFYUI_BRANCH`         | `master`                            | ComfyUI git tag/branch to build              |
-| `COMFYUI_COMMIT`         | *(empty)*                           | Pin a specific commit (on top of the branch) |
-| `COMFYUI_IS_RELEASE`     | `0`                                 | `1` publishes image release tags; otherwise only a `-pre` tag |
-| `COMFYUI_PUSH`           | `1`                                 | Push the image to the registry               |
-| `COMFYUI_FORCE_BUILD`    | *(unset)*                           | Set to `1` to rebuild even if the tag exists |
-| `REPO_GIT_REF`           | *(git tag, else short SHA)*         | Build revision appended to the tag           |
-
-The base image is resolved as
-`$COMFYUI_TORCH_IMAGE:v$COMFYUI_PYTORCH_VERSION-rocm-$COMFYUI_ROCM_VERSION`
-(e.g. `docker.io/mixa3607/pytorch-gfx906:v2.13.0-rocm-7.14`).
-
-### Build the image
-
-```bash
-. preset.v0.30.0-rocm-7.14.sh
-./build-and-push.image.sh
-```
-
-With `COMFYUI_IS_RELEASE=1`, five tags are created:
-
-- `$COMFYUI_IMAGE:$BRANCH-torch-$PYTORCH_VERSION-rocm-$ROCM_VERSION-$REPO_GIT_REF` — pinned to the build revision
-- `$COMFYUI_IMAGE:$BRANCH-torch-$PYTORCH_VERSION-rocm-$ROCM_VERSION`
-- `$COMFYUI_IMAGE:$BRANCH-rocm-$ROCM_VERSION-$REPO_GIT_REF` — pinned to the build revision
-- `$COMFYUI_IMAGE:$BRANCH-rocm-$ROCM_VERSION`
-- `$COMFYUI_IMAGE:latest-rocm-$ROCM_VERSION`
-
-Otherwise (`COMFYUI_IS_RELEASE=0`, the default), only
-`$COMFYUI_IMAGE:$BRANCH-torch-$PYTORCH_VERSION-rocm-$ROCM_VERSION-$REPO_GIT_REF-pre`
-is created.
-
-The build is skipped if the pinned tag is already in the registry, unless
-`COMFYUI_FORCE_BUILD=1`.
-
-The build log is saved to `./logs/build_<timestamp>.log`.
-
-### Push
-
-Set `COMFYUI_PUSH=0` to keep the image local (no `--push` passed to buildx).
-
-### Custom registry / local overrides
-
-Example:
-
-```bash
-export COMFYUI_ROCM_VERSION=7.14
-export COMFYUI_PYTORCH_VERSION=2.13.0
-export COMFYUI_BRANCH=v0.30.0
+export COMFYUI_ROCM_VERSION=10.1
+export COMFYUI_PYTORCH_VERSION=2.14.1
+export COMFYUI_BRANCH=v0.42.1
 export COMFYUI_IMAGE=registry.example.com/apps/comfyui-gfx906
 export COMFYUI_TORCH_IMAGE=registry.example.com/apps/pytorch-gfx906
 ./build-and-push.image.sh
 ```
 
-See [`../.env-local.sh`](../.env-local.sh) for a ready-made local override file.
+### Build variables
 
-## Benchmarks
+Defaults are defined in [`build-and-push.image.sh`](./build-and-push.image.sh). Export
+any variable to override it.
 
-| ROCm  | Comfy   | PyTorch | Preset                             | Batch | Time (s) | Notes                           |
-| ----- | ------- | ------- | ---------------------------------- | ----- | -------- | ------------------------------- |
-| 7.14  | v0.30.0 | v2.13.0 | SD 1.5                             | 1     | 3.5      |                                 |
-| 7.14  | v0.30.0 | v2.13.0 | SD 1.5                             | 2     | 6.7      |                                 |
-| 6.4.4 | v0.3.63 | v2.7.1  | SDXL                               | 1     | 33       |                                 |
-| 6.4.4 | v0.3.63 | v2.7.1  | SDXL                               | 2     | 65       |                                 |
-| 6.4.4 | v0.3.63 | v2.7.1  | SD 1.5                             | 1     | 3.8      |                                 |
-| 6.4.4 | v0.3.63 | v2.7.1  | SD 1.5                             | 2     | 7        |                                 |
-| 6.3.3 | v0.3.63 | v2.7.1  | SDXL                               | 1     | 33       |                                 |
-| 6.3.3 | v0.3.63 | v2.7.1  | SDXL                               | 2     | 65       |                                 |
-| 6.3.3 | v0.3.63 | v2.7.1  | SD 1.5                             | 1     | 3.8      |                                 |
-| 6.3.3 | v0.3.63 | v2.7.1  | SD 1.5                             | 2     | 7        |                                 |
-| 7.0.2 | v0.3.63 | v2.7.1  | 03_video_wan2_2_14B_i2v_subgraphed | 1     | 4522     | PowerLimit 200; TdcLimitGfx 160 |
-| 7.0.2 | v0.3.65 | v2.9.0  | video_wan2_2_14B_t2v               | 1     | 1265     | PowerLimit 200; TdcLimitGfx 160 |
-| 7.0.2 | v0.3.65 | v2.9.0  | video_wan2_2_14B_t2v               | 2     | 1762     | PowerLimit 200; TdcLimitGfx 160 |
+| Variable                  | Default                                    | Description                                                   |
+| ------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| `COMFYUI_IMAGE`           | `docker.io/mixa3607/comfyui-gfx906`        | Destination image name                                        |
+| `COMFYUI_TORCH_IMAGE`     | `docker.io/mixa3607/pytorch-gfx906`        | PyTorch base image name                                       |
+| `COMFYUI_ROCM_VERSION`    | `6.3.3`                                    | ROCm version of the base image                                |
+| `COMFYUI_PYTORCH_VERSION` | `2.7.1`                                    | PyTorch version of the base image                             |
+| `COMFYUI_REPO`            | `https://github.com/Comfy-Org/ComfyUI.git` | ComfyUI git repository                                        |
+| `COMFYUI_BRANCH`          | `master`                                   | ComfyUI git tag/branch to build                               |
+| `COMFYUI_COMMIT`          | _(empty)_                                  | Pin a specific commit (on top of the branch)                  |
+| `COMFYUI_IS_RELEASE`      | `0`                                        | `1` publishes image release tags; otherwise only a `-pre` tag |
+| `COMFYUI_PUSH`            | `1`                                        | Push the image to the registry                                |
+| `COMFYUI_FORCE_BUILD`     | _(unset)_                                  | Set to `1` to rebuild even if the tag exists                  |
+| `REPO_GIT_REF`            | _(git tag, else short SHA)_                | Build revision appended to the tag                            |
 
 ## Prebuilt images (legacy builds)
 

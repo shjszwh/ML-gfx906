@@ -5,21 +5,23 @@ ARG ROCM_BUILD="7.14.0-gfx906+20260802001858"
 FROM ${ROCM_BASE_IMAGE} AS rocm_base
 ARG ROCM_BUILD
 
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 ENV ROCM_BUILD=$ROCM_BUILD
 ENV ROCM_PATH=/opt/rocm
 ENV PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN --mount=type=bind,src=/,target=/build-context <<EOF_DOCKERFILE bash
-set -eo pipefail
-
-apt-get update
-apt-get install --no-install-recommends -y ca-certificates curl git jq
-/build-context/install-gfx906-repo.sh
-
-apt-get update
-/build-context/install-gfx906-rocm.sh
-
-rm -rf /var/lib/apt/lists/*
+  set -eo pipefail
+  
+  apt-get update
+  apt-get install --no-install-recommends -y ca-certificates curl git jq
+  /build-context/install-gfx906-repo.sh
+  
+  apt-get update
+  /build-context/install-gfx906-rocm.sh
+  
+  rm -rf /var/lib/apt/lists/*
 EOF_DOCKERFILE
 
 ############# Final image #############
