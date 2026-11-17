@@ -1,3 +1,6 @@
 /**/*.log
 /.opencode/
 /**/__pycache__/**/*
+/comfyui.zip
+/comfyui/comfyui.zip
+/ComfyUI-*.zip
