@@ -115,8 +115,18 @@ CMAKE_ARGS=(
   -DSTRATA_HIP_GFX906=ON
   -DSTRATA_ENABLE_HIP=OFF
   -DSTRATA_BUILD_TESTS=OFF
-  -DSTRATA_GGML_DIR="$PWD/third_party/llama.cpp"
 )
+# Strata up to 0.2.x has setup.get_llama_cpp() download llama.cpp into
+# third_party/llama.cpp and takes ggml and mtmd from it. Newer trees vendor
+# third_party/strata-ggml and third_party/strata-llama and treat STRATA_GGML_DIR
+# and LLAMA_DIR as empty-by-default overrides, so the flags are only passed when
+# that download is actually there.
+GGML_ARGS=()
+VISION_LLAMA_ARGS=()
+if [ -f third_party/llama.cpp/ggml/CMakeLists.txt ]; then
+  GGML_ARGS+=(-DSTRATA_GGML_DIR="$PWD/third_party/llama.cpp")
+  VISION_LLAMA_ARGS+=(-DLLAMA_DIR="$PWD/third_party/llama.cpp")
+fi
 # DeepSeek is its own executable. The flag stays off unless the build asks, so
 # the Qwen engine configure is the one this image already used.
 if [ "${STRATA_BUILD_DSV41:-0}" = "1" ]; then
@@ -126,7 +136,7 @@ if [ "${STRATA_BUILD_DSV41:-0}" = "1" ]; then
     -DSTRATA_BUILD_ID="$(cut -c1-12 SOURCE_COMMIT 2>/dev/null || echo unknown)"
   )
 fi
-cmake -S . -B build -G Ninja "${CMAKE_ARGS[@]}"
+cmake -S . -B build -G Ninja "${CMAKE_ARGS[@]}" "${GGML_ARGS[@]}"
 cmake --build build --target strata --parallel "$(nproc)"
 if [ "${STRATA_BUILD_DSV41:-0}" = "1" ]; then
   cmake --build build --target strata-dsv41 --parallel "$(nproc)"
@@ -143,18 +153,16 @@ fi
 CMAKE_ARGS=(
   "${CMAKE_COMMON_ARGS[@]}"
   -DSTRATA_VISION_CUDA=OFF
-  -DLLAMA_DIR="$PWD/third_party/llama.cpp"
 )
-cmake -S tools/vision -B build-vision -G Ninja "${CMAKE_ARGS[@]}"
+cmake -S tools/vision -B build-vision -G Ninja "${CMAKE_ARGS[@]}" "${VISION_LLAMA_ARGS[@]}"
 cmake --build build-vision --target strata-vision --parallel "$(nproc)"
 
 CMAKE_ARGS=(
   "${CMAKE_HIP_ARGS[@]}"
   -DSTRATA_VISION_HIP=ON
   -DSTRATA_VISION_HIP_ARCHS="$ROCM_ARCH"
-  -DLLAMA_DIR="$PWD/third_party/llama.cpp"
 )
-cmake -S tools/vision -B build-vision-hip -G Ninja "${CMAKE_ARGS[@]}"
+cmake -S tools/vision -B build-vision-hip -G Ninja "${CMAKE_ARGS[@]}" "${VISION_LLAMA_ARGS[@]}"
 cmake --build build-vision-hip --target strata-vision --parallel "$(nproc)"
 
 mkdir -p engine
@@ -201,9 +209,11 @@ RUN build_id="$(cat SOURCE_COMMIT 2>/dev/null || echo unknown)" && \
       --allow-lib librocblas.so.5 \
       --allow-lib libamdhip64.so.7 \
       $dsv41_args && \
-    mkdir -p /out/seed/third_party/llama.cpp/ggml && \
-    cp third_party/llama.cpp/ggml/CMakeLists.txt /out/seed/third_party/llama.cpp/ggml/ && \
-    cp -a third_party/llama.cpp/gguf-py /out/seed/third_party/llama.cpp/
+    if [ -f third_party/llama.cpp/ggml/CMakeLists.txt ]; then \
+      mkdir -p /out/seed/third_party/llama.cpp/ggml && \
+      cp third_party/llama.cpp/ggml/CMakeLists.txt /out/seed/third_party/llama.cpp/ggml/ && \
+      cp -a third_party/llama.cpp/gguf-py /out/seed/third_party/llama.cpp/; \
+    fi
 
 ############# Copy and install all #############
 FROM rocm_base AS final

@@ -31,10 +31,10 @@ export STRATA_CMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp"
 Upstream Strata skips `strata-dsv41` on gfx906 until
 [pull request 5739](https://github.com/Niko1221/Strata/pull/5739) is merged.
 Until then, source the preset. It clones `shjszwh/mi50-Strata` branch
-`gfx906-dsv41` and checks out commit
-`5755523109403cbdee27e4da58e6398a782df871`.
+`gfx906-dsv41` at its head, so every build takes whatever is on the branch
+last.
 
-That commit carries one fix: the MMQ entry point used to be probed with
+The branch carries one fix: the MMQ entry point used to be probed with
 `__has_include("mmid.cuh")`, but the pinned llama.cpp `3cf03257` ships that
 header and still has the 4-argument API, so `src/prefill/moe_mmq.cu` failed
 to compile. CMake now reads the `mmq.cuh` signature instead and passes
@@ -58,15 +58,21 @@ builds both `strata` and `strata-dsv41`. `FAMILY` then selects which one
 `strata launch` starts. Base image:
 `docker.io/mixa3607/rocm-gfx906:10.1-complete`.
 
-llama.cpp still comes from `setup.get_llama_cpp()` (the tree's pin
-`3cf03257`). The engine that was run on MI50 used llama.cpp `cd4ed902`
-instead. That tree reports `GGML_TYPE_COUNT` 44, and the trellis overlay
-anchors on 43, so the overlay stays off. Which MMQ entry points to call
-now comes from the signature probe described above, so both trees work.
+llama.cpp used to come from `setup.get_llama_cpp()`, which downloads a pinned
+checkout into `third_party/llama.cpp`. The branch vendors its own trees now
+(`third_party/strata-ggml`, `third_party/strata-llama`, `third_party/strata-gguf-py`),
+so `get_llama_cpp()` downloads nothing and `STRATA_GGML_DIR` / `LLAMA_DIR` are
+left alone. The Dockerfile only passes those two overrides when
+`third_party/llama.cpp/ggml/CMakeLists.txt` exists, which is the case for the
+older release trees the daily Qwen workflow builds. The MI50 run used llama.cpp
+`cd4ed902`; that tree reports `GGML_TYPE_COUNT` 44 and the trellis overlay
+anchors on 43, so the overlay stays off there. Which MMQ entry points to call
+comes from the signature probe described above, so both trees work.
 
 After 5739 is merged, point `STRATA_REPO` back at
-`https://github.com/Niko1221/Strata.git` and set `STRATA_COMMIT` to the
-merged commit. Keep `STRATA_BUILD_DSV41=1`.
+`https://github.com/Niko1221/Strata.git` and set `STRATA_BRANCH` to the branch
+that carries the merge; there is no commit to pin. Keep
+`STRATA_BUILD_DSV41=1`.
 
 ### CI
 
@@ -79,9 +85,15 @@ otherwise stays on `gfx906-dsv41`.
 The preset is a local shell snippet that CI never loads, so the workflow
 repeats its values in `env`. It needs no secret: with no Docker Hub
 credentials the login step falls back to GHCR, and the image is pushed to
-`ghcr.io/<fork-owner>/strata-gfx906`. Without a tag on the checked-out commit
-the build is not a release, so the only tag it writes is
-`deepseek41-rocm-10.1-<sha>-pre`.
+`ghcr.io/<fork-owner>/strata-gfx906`. Nothing is pinned: the workflow resolves
+the head of `gfx906-dsv41` with `git ls-remote` before the build and passes that
+commit to the Dockerfile, so a run always builds the latest branch code and the
+log prints the commit it used. Without a tag on the checked-out commit the build
+is not a release, so the only tag it writes is
+`deepseek41-rocm-10.1-<strata-commit>-<sha>-pre`: the first is the resolved
+`gfx906-dsv41` head, the second the ML-gfx906 commit. Because the Strata commit
+is part of the tag, a new commit on that branch produces a new image instead of
+hitting the "already published, skip" check.
 
 ## Run
 

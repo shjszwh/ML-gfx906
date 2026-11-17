@@ -4,6 +4,10 @@ name: Strata DeepSeek V4.1 gfx906 build
 # (strata/preset.deepseek41-rocm-10.1.sh). The preset is a local shell snippet
 # that CI never reads, so every value it sets is repeated in env below.
 # The daily Qwen workflow (strata-build.yaml) is left untouched.
+#
+# No Strata commit is pinned. "Resolve build parameters" asks the remote for the
+# head of STRATA_BRANCH with git ls-remote and builds that exact commit, so every
+# run picks up whatever landed on gfx906-dsv41 last.
 
 on:
   push:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       strata_tag:
-        description: "Strata branch to build (empty = gfx906-dsv41; STRATA_COMMIT stays pinned)"
+        description: "Strata branch to build (empty = gfx906-dsv41, built at its current head)"
         required: false
         default: ""
       force_build:
@@ -31,12 +35,12 @@ jobs:
     env:
       STRATA_REPO: "https://github.com/shjszwh/mi50-Strata.git"
       STRATA_ROCM_VERSION: "10.1"
-      # Falls back to the pinned branch for push events, where inputs is empty.
+      # Falls back to the default branch for push events, where inputs is empty.
+      # STRATA_COMMIT and STRATA_PRESET_NAME are resolved in "Resolve build
+      # parameters" from this branch's head, then exported through $GITHUB_ENV.
       STRATA_BRANCH: "${{ inputs.strata_tag || 'gfx906-dsv41' }}"
-      STRATA_COMMIT: "5755523109403cbdee27e4da58e6398a782df871"
       STRATA_PATCH: "empty.patch"
       STRATA_BUILD_DSV41: "1"
-      STRATA_PRESET_NAME: "deepseek41-rocm-10.1"
       # The preset does not set this, and the verified MI50 build ran without
       # it, so it stays empty to reproduce that build exactly.
       STRATA_CMAKE_HIP_FLAGS: ""
@@ -73,16 +77,31 @@ jobs:
             echo "STRATA_BRANCH is empty." >&2
             exit 1
           fi
+          # Always build the branch head. Resolving it here (instead of inside
+          # the Dockerfile) also lets the tag carry the commit, so a new commit
+          # on the branch is never mistaken for an already published image.
+          STRATA_COMMIT="$(git ls-remote --heads "$STRATA_REPO" "refs/heads/$STRATA_BRANCH" | cut -f1)"
+          if [ "$STRATA_COMMIT" == "" ]; then
+            echo "Cannot resolve refs/heads/$STRATA_BRANCH in $STRATA_REPO." >&2
+            exit 1
+          fi
+          STRATA_COMMIT_SHORT="$(printf '%s' "$STRATA_COMMIT" | cut -c1-12)"
           : "${REPO_GIT_REF:="$(git_get_current_ref)"}"
           : "${STRATA_IS_RELEASE:="0"}"
           : "${STRATA_IMAGE:="$REGISTRY_ROOT/strata-gfx906"}"
           : "${STRATA_BASE_IMAGE:="docker.io/mixa3607/rocm-gfx906:$STRATA_ROCM_VERSION-complete"}"
-          : "${STRATA_PRESET_NAME:="deepseek41-rocm-$STRATA_ROCM_VERSION"}"
+          : "${STRATA_PRESET_NAME:="deepseek41-rocm-$STRATA_ROCM_VERSION-$STRATA_COMMIT_SHORT"}"
+
+          echo "STRATA_REPO:   $STRATA_REPO"
+          echo "STRATA_BRANCH: $STRATA_BRANCH"
+          echo "STRATA_COMMIT: $STRATA_COMMIT"
 
           echo "REPO_GIT_REF=$REPO_GIT_REF"             >> "$GITHUB_ENV"
           echo "STRATA_IMAGE=$STRATA_IMAGE"             >> "$GITHUB_ENV"
           echo "STRATA_IS_RELEASE=$STRATA_IS_RELEASE"   >> "$GITHUB_ENV"
           echo "STRATA_BRANCH=$STRATA_BRANCH"           >> "$GITHUB_ENV"
+          echo "STRATA_COMMIT=$STRATA_COMMIT"           >> "$GITHUB_ENV"
+          echo "STRATA_COMMIT_SHORT=$STRATA_COMMIT_SHORT" >> "$GITHUB_ENV"
           echo "STRATA_PRESET_NAME=$STRATA_PRESET_NAME" >> "$GITHUB_ENV"
           echo "STRATA_BASE_IMAGE=$STRATA_BASE_IMAGE"   >> "$GITHUB_ENV"
 
