@@ -27,13 +27,20 @@ jobs:
       matrix:
         build:
           - rocm_version: "10.1"
-            release_tag: "20261027183317"
+            # This fork builds its own master: the upstream checkpoint tags
+            # (2026xxxx) only exist in mixa3607/ML-gfx906, and the source tree
+            # below them predates the v0.2.16 layout.
+            release_tag: "master"
     env:
       STRATA_REPO: "https://github.com/Niko1221/Strata.git"
       STRATA_ROCM_VERSION: "${{ matrix.build.rocm_version }}"
-      STRATA_BRANCH: "${{ inputs.strata_tag }}"
+      # Pinned instead of "latest release": the image this workflow ships is the
+      # one built and checked on gfx906. Override with the strata_tag input.
+      STRATA_BRANCH: "${{ inputs.strata_tag || 'v0.2.16' }}"
       STRATA_PATCH: "v0.2.16.patch"
-      STRATA_CMAKE_HIP_FLAGS: "-mllvm -amdgpu-sched-strategy=max-ilp"
+      # Empty: the gfx906 build was built and checked without the scheduling
+      # flag; set it to "-mllvm -amdgpu-sched-strategy=max-ilp" to A/B it.
+      STRATA_CMAKE_HIP_FLAGS: ""
       STRATA_FORCE_BUILD: "${{ inputs.force_build && '1' || '0' }}"
     steps:
       - name: Checkout repo
