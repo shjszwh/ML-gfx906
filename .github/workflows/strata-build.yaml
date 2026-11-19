@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       strata_tag:
-        description: "Strata tag to build (empty = latest)"
+        description: "Strata tag to build, e.g. v0.2.16 (empty = v0.2.16). Not the image preset: v0.2.16-rocm-10.1 is not a Strata ref."
         required: false
         default: ""
       force_build:
@@ -71,6 +71,16 @@ jobs:
           if [ "$STRATA_BRANCH" == "" ]; then
             STRATA_BRANCH="$("$GITHUB_WORKSPACE/.github/scripts/github_get_last" --type release --repo "$STRATA_REPO" --github-token "$GITHUB_TOKEN")"
           fi
+          # Fail here, not inside the image build, when the name is not a Strata ref:
+          # the image preset (v0.2.16-rocm-10.1) is derived from the branch and is
+          # not something the Strata repository can be cloned at.
+          if ! git ls-remote --exit-code "$STRATA_REPO" \
+                 "refs/tags/$STRATA_BRANCH" "refs/heads/$STRATA_BRANCH" >/dev/null; then
+            echo "STRATA_BRANCH='$STRATA_BRANCH' is neither a tag nor a branch of $STRATA_REPO." >&2
+            echo "Give a Strata tag such as v0.2.16 (or leave the input empty)." >&2
+            exit 1
+          fi
+          echo "STRATA_BRANCH resolves in $STRATA_REPO"
           : "${REPO_GIT_REF:="$(git_get_current_ref)"}"
           : "${STRATA_IMAGE:="$REGISTRY_ROOT/strata-gfx906"}"
           : "${STRATA_IS_RELEASE:="$([ -n "$(git_get_current_tag)" ] && echo 1 || echo 0)"}"
