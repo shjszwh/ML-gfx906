@@ -33,12 +33,9 @@ card under 24 GB of VRAM, and gfx906 cards are 16 GB (MI50, Radeon VII) or 32 GB
 optional, and the build fails when the reader it was asked for is missing.
 
 That first hunk is an upstream fix sent as a pull request (branch
-`fix/gfx906-stream-priority` of the `shjszwh/mi50-Strata` fork). Once it is
-merged, `v0.2.16.patch` stops applying and
-`build-context/patch/v0.2.16-setup-only.patch` (the arch hunk alone) is used
-instead; the build picks whichever of the two applies and fails when neither
-does. After the merge, set `STRATA_PATCH` to the setup-only patch and delete the
-combined one.
+`fix/gfx906-stream-priority` of the `shjszwh/mi50-Strata` fork). Once upstream
+takes it, `v0.2.16.patch` stops applying and the build fails on it rather than
+building without the arch hunk, so the patch needs a revision at that point.
 
 Log in to the destination registry and run from this directory:
 
