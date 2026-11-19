@@ -3,7 +3,7 @@
 ARG ROCM_IMAGE="docker.io/mixa3607/rocm-gfx906:10.1-complete"
 ARG ROCM_ARCH="gfx906"
 ARG STRATA_REPO="https://github.com/Niko1221/Strata.git"
-ARG STRATA_BRANCH="v0.2.15"
+ARG STRATA_BRANCH="v0.2.16"
 ARG STRATA_COMMIT=""
 ARG STRATA_PATCH="empty.patch"
 ARG CMAKE_HIP_FLAGS=""
@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
-WORKDIR /opt/strata
+WORKDIR /src
 
 ############# Prepare code #############
 FROM rocm_base AS files_strata
@@ -41,10 +41,7 @@ RUN <<'EOF' bash
 EOF
 
 COPY patch/${STRATA_PATCH} /tmp/strata.patch
-RUN git apply --allow-empty /tmp/strata.patch && rm -rf .git bench/results/ docs/
-# Downloads llama.cpp into third_party/llama.cpp for the release trees that still
-# need it; a no-op on v0.2.15, which vendors its ggml and llama trees.
-RUN python3 -c 'import setup; setup.get_llama_cpp()'
+RUN git apply --allow-empty /tmp/strata.patch && rm -rf .git
 
 ############# Build #############
 FROM rocm_base AS build_strata
@@ -55,7 +52,8 @@ ARG CCACHE_MAXSIZE
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential cmake ninja-build ccache && \
     rm -rf /var/lib/apt/lists/*
-COPY --from=files_strata /opt/strata /opt/strata
+COPY --from=files_strata /src /src
+WORKDIR /src
 
 ENV CCACHE_DIR=/ccache CCACHE_MAXSIZE=${CCACHE_MAXSIZE}
 RUN --mount=type=cache,target=/ccache <<'EOF_DOCKERFILE' bash
@@ -82,112 +80,106 @@ CMAKE_HIP_ARGS=(
   -DCMAKE_PREFIX_PATH="$ROCM_PATH"
 )
 
-# v0.2.15 vendors third_party/strata-ggml and third_party/strata-llama and
-# setup.get_llama_cpp() downloads nothing any more, so third_party/llama.cpp only
-# exists for the older release trees (v0.2.3.1 and before). Pass the override
-# only when the tree is there: pointing -DSTRATA_GGML_DIR / -DLLAMA_DIR at a
-# directory that is never created fails the configure step.
-LLAMA_OVERRIDE="$PWD/third_party/llama.cpp"
-
-CMAKE_ARGS=(
-  "${CMAKE_HIP_ARGS[@]}"
-  -DSTRATA_HIP_GFX906=ON
-  -DSTRATA_ENABLE_HIP=OFF
+# The engine: the gfx906 source build of docs/AMD_HIP.md (wave64 compat layer,
+# STRATA_HIP_GFX906, no wave32 HIP backend).
+cmake -S engine -B build -G Ninja \
+  "${CMAKE_HIP_ARGS[@]}" \
+  -DSTRATA_HIP_GFX906=ON \
+  -DSTRATA_ENABLE_HIP=OFF \
   -DSTRATA_BUILD_TESTS=OFF
-)
-if [ -f "$LLAMA_OVERRIDE/ggml/CMakeLists.txt" ]; then
-  CMAKE_ARGS+=(-DSTRATA_GGML_DIR="$LLAMA_OVERRIDE")
-fi
-cmake -S . -B build -G Ninja "${CMAKE_ARGS[@]}"
-cmake --build build --target strata --parallel "$(nproc)"
 
-CMAKE_ARGS=(
-  "${CMAKE_COMMON_ARGS[@]}"
-  -DSTRATA_VISION_CUDA=OFF
-)
-if [ -f "$LLAMA_OVERRIDE/ggml/CMakeLists.txt" ]; then
-  CMAKE_ARGS+=(-DLLAMA_DIR="$LLAMA_OVERRIDE")
+# tools/packaging/engine_targets.sh answers "strata strata_kq" even where ninja
+# rejects strata_kq (its dry-run probe exits 0), so decide from the build graph.
+targets="strata"
+if grep -qE '^build [^:]*libstrata_kq\.so' build/build.ninja 2>/dev/null; then
+  targets="strata strata_kq"
 fi
-cmake -S tools/vision -B build-vision -G Ninja "${CMAKE_ARGS[@]}"
+echo "engine targets: $targets"
+cmake --build build --target $targets --parallel "$(nproc)"
+
+# The picture reader on the GPU (terminal/tools/vision, its own tower on hipBLAS).
+cmake -S terminal/tools/vision -B build-vision -G Ninja \
+  "${CMAKE_HIP_ARGS[@]}" \
+  -DSTRATA_VISION_HIP=ON \
+  -DSTRATA_VISION_HIP_ARCHS="$ROCM_ARCH"
 cmake --build build-vision --target strata-vision --parallel "$(nproc)"
 
-CMAKE_ARGS=(
-  "${CMAKE_HIP_ARGS[@]}"
-  -DSTRATA_VISION_HIP=ON
-  -DSTRATA_VISION_HIP_ARCHS="$ROCM_ARCH"
-)
-if [ -f "$LLAMA_OVERRIDE/ggml/CMakeLists.txt" ]; then
-  CMAKE_ARGS+=(-DLLAMA_DIR="$LLAMA_OVERRIDE")
-fi
-cmake -S tools/vision -B build-vision-hip -G Ninja "${CMAKE_ARGS[@]}"
-cmake --build build-vision-hip --target strata-vision --parallel "$(nproc)"
+mkdir -p /stage
+cp build/strata /stage/
+[ -f build/libstrata_kq.so ] && cp build/libstrata_kq.so /stage/ || true
+[ -f build-vision/bin/strata-vision-hip ] && cp build-vision/bin/strata-vision-hip /stage/ || true
 
-mkdir -p engine
-cp build/strata build-vision/bin/strata-vision build-vision-hip/bin/strata-vision-hip engine/
+version="$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' engine/CMakeLists.txt | head -1)"
+cat > /stage/BUILD.json <<JSON
+{"version": "${version:-dev}", "source": "docker build", "archs": "$ROCM_ARCH", "portable": true, "vision_archs": "$ROCM_ARCH"}
+JSON
+cat /stage/BUILD.json
 
-# Let upstream setup reuse the precompiled engines instead of rebuilding them.
-python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-import setup
-
-rocm = str(Path(os.environ.get('ROCM_PATH', '/opt/rocm')).resolve())
-meta = {
-  "source": "local-hip",
-  "backend": "hip",
-  "version": setup.source_version(),
-  "archs": os.environ['ROCM_ARCH'].split(';'),
-  "vision": "gpu",
-  "vision_archs": os.environ['ROCM_ARCH'].split(';'),
-  "vision_gpu": setup.HVEXE,
-  "vision_cpu": setup.VEXE,
-  "lib_dirs": ["/opt/rocm/lib"],
-  "src": setup.source_hash(setup.ENGINE_SOURCES),
-  "vision_src": setup.source_hash(setup.VISION_SOURCES),
-}
-Path(setup.ROOT / "engine" / "BUILD.json").write_text(json.dumps(meta, indent=1) + '\n')
-PY
+python3 tools/packaging/stage_tuning.py --stage /stage --archs "$ROCM_ARCH" --rocm "$ROCM_PATH"
+python3 tools/packaging/package_engine.py \
+  --src /stage --backend hip --arch "$ROCM_ARCH" \
+  --version "${version:-dev}" --variant "$ROCM_ARCH" \
+  --out /out/components/engine \
+  --build-id "$(cat SOURCE_COMMIT 2>/dev/null || echo unknown)" \
+  --allow-lib libhipblas.so.3 \
+  --allow-lib libhipblaslt.so.1 \
+  --allow-lib librocblas.so.5 \
+  --allow-lib libamdhip64.so.7
 EOF_DOCKERFILE
-
-RUN build_id="$(cat SOURCE_COMMIT 2>/dev/null || echo unknown)" && \
-    python3 packaging/stage_tuning.py --stage engine --archs "$ROCM_ARCH" --rocm "$ROCM_PATH" && \
-    python3 packaging/package_engine.py \
-      --src engine --backend hip --arch "$ROCM_ARCH" \
-      --version "$(python3 -c 'import setup; print(setup.source_version())')" \
-      --variant "$ROCM_ARCH" --out /out/components/engine \
-      --build-id "$build_id" \
-      --allow-lib libhipblas.so.3 \
-      --allow-lib libhipblaslt.so.1 \
-      --allow-lib librocblas.so.5 \
-      --allow-lib libamdhip64.so.7 && \
-    if [ -f third_party/llama.cpp/ggml/CMakeLists.txt ]; then \
-      mkdir -p /out/seed/third_party/llama.cpp/ggml && \
-      cp third_party/llama.cpp/ggml/CMakeLists.txt /out/seed/third_party/llama.cpp/ggml/ && \
-      cp -a third_party/llama.cpp/gguf-py /out/seed/third_party/llama.cpp/; \
-    fi
 
 ############# Copy and install all #############
 FROM rocm_base AS final
-WORKDIR /opt/strata/terminal
 
-# Terminal sources and the container scripts.
-COPY --from=files_strata /opt/strata /opt/strata/terminal
-COPY --from=build_strata /out/ /opt/strata/
-COPY extra/ /opt/strata/
-RUN /opt/strata/install-python-deps.sh && /opt/strata/validate-build.sh
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      tini ca-certificates libgomp1 libatomic1 python3 python3-venv \
+      libdrm2 libdrm-amdgpu1 libelf1t64 libtinfo6 libpci3 && \
+    rm -rf /var/lib/apt/lists/*
 
+COPY --from=files_strata /src/terminal /opt/strata/terminal
+COPY --from=build_strata /out/components/engine/ /opt/strata/components/engine/
+COPY --from=files_strata /src/tools/docker/entrypoint.sh /opt/strata/entrypoint.sh
+COPY --from=files_strata /src/tools/docker/healthcheck.sh /opt/strata/healthcheck.sh
+COPY --from=files_strata /src/tools/docker/strata-wrapper.sh /usr/local/bin/strata
+RUN chmod 0755 /opt/strata/entrypoint.sh /opt/strata/healthcheck.sh /usr/local/bin/strata
+
+# The Terminal's private runtime: upstream ships a pinned CPython in the release
+# archive, here a venv with the same pins of terminal/requirements*.txt.
+RUN set -eux; \
+    cd /opt/strata/terminal; \
+    python3 -m venv python; \
+    python/bin/pip install --no-cache-dir -r requirements.txt -r requirements-monitor.txt; \
+    bin/strata --version
+
+# The component manifest hashes, and every library of the two programs resolves
+# against the package or the base image's ROCm.
+RUN set -e; \
+    for d in /opt/strata/components/engine/*/; do \
+      echo "== $d"; \
+      PYTHONPATH=/opt/strata/terminal /opt/strata/terminal/python/bin/python3 -c 'import sys; from pathlib import Path; from strata_control import engine_component as ec; ec.verify(ec.read_manifest(Path(sys.argv[1])), full=True)' "$d"; \
+      for f in "$d"strata "$d"strata-vision-hip; do \
+        [ -f "$f" ] || continue; \
+        miss=$(LD_LIBRARY_PATH="$d:/opt/rocm/lib" ldd "$f" 2>/dev/null | grep 'not found' | grep -v -E 'libcuda\.so|libnvidia|libhsa-runtime64|libdrm_amdgpu' || true); \
+        if [ -n "$miss" ]; then echo "MISSING LIBS in $f"; echo "$miss"; exit 1; fi; \
+      done; \
+      echo "libraries of $d resolve inside this image"; \
+    done
+
+WORKDIR /opt/strata
 ENV STRATA_COMPONENTS_DIR=/opt/strata/components \
     STRATA_INSTALL_DIR=/data/install \
-    STRATA_IN_DOCKER=1 \
     XDG_STATE_HOME=/data/state \
     XDG_CONFIG_HOME=/data/config \
     HOME=/data/home \
     PORT=8080 \
-    PYTHONNOUSERSITE=1
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONNOUSERSITE=1 \
+    STRATA_IN_DOCKER=1
 
-EXPOSE 8080
 VOLUME ["/data"]
-HEALTHCHECK --interval=30s --timeout=8s --start-period=2h --retries=3 CMD ["/opt/strata/terminal/docker/healthcheck.sh"]
-ENTRYPOINT ["/usr/bin/tini", "--", "/opt/strata/terminal/docker/entrypoint.sh"]
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=8s --start-period=2h --retries=3 CMD ["/opt/strata/healthcheck.sh"]
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/strata/entrypoint.sh"]
 CMD ["run"]
