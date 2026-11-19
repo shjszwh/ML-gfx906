@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       strata_tag:
-        description: "Strata tag to build, e.g. v0.2.16 (empty = v0.2.16). Not the image preset: v0.2.16-rocm-10.1 is not a Strata ref."
+        description: "Strata tag to build (empty = the latest Strata release, resolved when the run starts). A tag such as v0.2.16; the image preset v0.2.16-rocm-10.1 is not a Strata ref."
         required: false
         default: ""
       force_build:
@@ -34,9 +34,11 @@ jobs:
     env:
       STRATA_REPO: "https://github.com/Niko1221/Strata.git"
       STRATA_ROCM_VERSION: "${{ matrix.build.rocm_version }}"
-      # Pinned instead of "latest release": the image this workflow ships is the
-      # one built and checked on gfx906. Override with the strata_tag input.
-      STRATA_BRANCH: "${{ inputs.strata_tag || 'v0.2.16' }}"
+      # Empty input: "Resolve build parameters" asks the GitHub API for the latest
+      # Strata release and builds that tag, so a new upstream release is picked up
+      # without a commit here (the patch below stays the one for v0.2.16, so a
+      # release that moves the tree again fails until this workflow is updated).
+      STRATA_BRANCH: "${{ inputs.strata_tag }}"
       STRATA_PATCH: "v0.2.16.patch"
       # Empty: the gfx906 build was built and checked without the scheduling
       # flag; set it to "-mllvm -amdgpu-sched-strategy=max-ilp" to A/B it.
@@ -80,7 +82,7 @@ jobs:
             echo "Give a Strata tag such as v0.2.16 (or leave the input empty)." >&2
             exit 1
           fi
-          echo "STRATA_BRANCH resolves in $STRATA_REPO"
+          echo "STRATA_BRANCH '$STRATA_BRANCH' resolves in $STRATA_REPO"
           : "${REPO_GIT_REF:="$(git_get_current_ref)"}"
           : "${STRATA_IMAGE:="$REGISTRY_ROOT/strata-gfx906"}"
           : "${STRATA_IS_RELEASE:="$([ -n "$(git_get_current_tag)" ] && echo 1 || echo 0)"}"
