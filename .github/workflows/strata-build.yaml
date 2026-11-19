@@ -43,6 +43,9 @@ jobs:
       # Empty: the gfx906 build was built and checked without the scheduling
       # flag; set it to "-mllvm -amdgpu-sched-strategy=max-ilp" to A/B it.
       STRATA_CMAKE_HIP_FLAGS: ""
+      # cpu: the component carries the CPU picture reader (what a card under
+      # 24 GB of VRAM uses by default), gpu: strata-vision-hip, both: the two.
+      STRATA_PICTURE_READER: "cpu"
       STRATA_FORCE_BUILD: "${{ inputs.force_build && '1' || '0' }}"
     steps:
       - name: Checkout repo

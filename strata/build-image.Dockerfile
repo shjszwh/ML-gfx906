@@ -8,6 +8,13 @@ ARG STRATA_COMMIT=""
 ARG STRATA_PATCH="empty.patch"
 ARG CMAKE_HIP_FLAGS=""
 ARG CCACHE_MAXSIZE="2G"
+# Which picture reader(s) the component carries: cpu = strata-vision (the CPU
+# reader a card under 24 GB of VRAM gets by default, and the fallback of the GPU
+# one), gpu = strata-vision-hip, both = the two programs upstream's AMD packages
+# carry. cpu is the default here: gfx906 pictures run on the processor, which
+# keeps the ~1-1.4 GB of VRAM for the experts and stays off the GPU reader that
+# upstream checks on no gfx906 card (docs/AMD_HIP.md).
+ARG STRATA_PICTURE_READER="cpu"
 
 ############# Base image #############
 FROM ${ROCM_IMAGE} AS rocm_base
@@ -48,6 +55,7 @@ FROM rocm_base AS build_strata
 ARG ROCM_ARCH
 ARG CMAKE_HIP_FLAGS
 ARG CCACHE_MAXSIZE
+ARG STRATA_PICTURE_READER
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential cmake ninja-build ccache && \
@@ -97,21 +105,65 @@ fi
 echo "engine targets: $targets"
 cmake --build build --target $targets --parallel "$(nproc)"
 
-# The picture reader on the GPU (terminal/tools/vision, its own tower on hipBLAS).
-cmake -S terminal/tools/vision -B build-vision -G Ninja \
-  "${CMAKE_HIP_ARGS[@]}" \
-  -DSTRATA_VISION_HIP=ON \
-  -DSTRATA_VISION_HIP_ARCHS="$ROCM_ARCH"
-cmake --build build-vision --target strata-vision --parallel "$(nproc)"
+# The picture readers: terminal/tools/vision, its own tower as plain C++17 on the
+# CPU and on hipBLAS for the card. The CPU program is named strata-vision and is
+# the reader a card under 24 GB of VRAM gets by default (strata_control/
+# vision_reader.py); the GPU one is strata-vision-hip, built only when asked for.
+case "$STRATA_PICTURE_READER" in
+cpu|gpu|both) ;;
+*)
+  echo "STRATA_PICTURE_READER must be cpu, gpu or both (got '$STRATA_PICTURE_READER')" >&2
+  exit 1
+  ;;
+esac
+
+if [ "$STRATA_PICTURE_READER" != "gpu" ]; then
+  # No CUDA/HIP switch: this builds the CPU reader, so the program keeps its
+  # default name strata-vision.
+  cmake -S terminal/tools/vision -B build-vision-cpu -G Ninja \
+    "${CMAKE_COMMON_ARGS[@]}" \
+    -DSTRATA_PORTABLE=ON
+  cmake --build build-vision-cpu --target strata-vision --parallel "$(nproc)"
+fi
+
+if [ "$STRATA_PICTURE_READER" != "cpu" ]; then
+  # The GPU reader (its own tower on hipBLAS). Upstream checks pictures on no
+  # gfx906 card (docs/AMD_HIP.md), which is why this is not the default here.
+  cmake -S terminal/tools/vision -B build-vision -G Ninja \
+    "${CMAKE_HIP_ARGS[@]}" \
+    -DSTRATA_VISION_HIP=ON \
+    -DSTRATA_VISION_HIP_ARCHS="$ROCM_ARCH"
+  cmake --build build-vision --target strata-vision --parallel "$(nproc)"
+fi
 
 mkdir -p /stage
 cp build/strata /stage/
 [ -f build/libstrata_kq.so ] && cp build/libstrata_kq.so /stage/ || true
-[ -f build-vision/bin/strata-vision-hip ] && cp build-vision/bin/strata-vision-hip /stage/ || true
+# A component without its reader starts text-only, and the `[ -f ] && cp || true`
+# used here once dropped the CPU reader for a whole release: stage the reader the
+# parameter asked for, and stop the build when it is not there.
+if [ "$STRATA_PICTURE_READER" != "gpu" ]; then
+  cp build-vision-cpu/bin/strata-vision /stage/
+  if [ ! -x /stage/strata-vision ]; then
+    echo "the CPU picture reader was not built: ${STRATA_PICTURE_READER} needs build-vision-cpu/bin/strata-vision" >&2
+    exit 1
+  fi
+fi
+if [ "$STRATA_PICTURE_READER" != "cpu" ]; then
+  cp build-vision/bin/strata-vision-hip /stage/
+  if [ ! -x /stage/strata-vision-hip ]; then
+    echo "the GPU picture reader was not built: ${STRATA_PICTURE_READER} needs build-vision/bin/strata-vision-hip" >&2
+    exit 1
+  fi
+fi
 
 version="$(sed -n 's/^[[:space:]]*project([^)]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' engine/CMakeLists.txt | head -1)"
+# vision_archs only when a GPU reader is in the package: the CPU one has no gfx
+# code, and the field is what hip_reader() reads as "built for these cards".
+vision_archs=""
+[ "$STRATA_PICTURE_READER" = "cpu" ] || vision_archs=", \"vision_archs\": \"$ROCM_ARCH\""
 cat > /stage/BUILD.json <<JSON
-{"version": "${version:-dev}", "source": "docker build", "archs": "$ROCM_ARCH", "portable": true, "vision_archs": "$ROCM_ARCH"}
+{"version": "${version:-dev}", "source": "docker build", "archs": "$ROCM_ARCH", "portable": true, "vision": "$STRATA_PICTURE_READER"$vision_archs}
 JSON
 cat /stage/BUILD.json
 
@@ -151,18 +203,22 @@ RUN set -eux; \
     python/bin/pip install --no-cache-dir -r requirements.txt -r requirements-monitor.txt; \
     bin/strata --version
 
-# The component manifest hashes, and every library of the two programs resolves
-# against the package or the base image's ROCm.
+# The component manifest hashes, every library of the programs resolves against
+# the package or the base image's ROCm, and the picture reader this image was
+# built with is in the package and starts.
 RUN set -e; \
     for d in /opt/strata/components/engine/*/; do \
       echo "== $d"; \
       PYTHONPATH=/opt/strata/terminal /opt/strata/terminal/python/bin/python3 -c 'import sys; from pathlib import Path; from strata_control import engine_component as ec; ec.verify(ec.read_manifest(Path(sys.argv[1])), full=True)' "$d"; \
-      for f in "$d"strata "$d"strata-vision-hip; do \
+      readers=0; \
+      for f in "$d"strata "$d"strata-vision "$d"strata-vision-hip; do \
         [ -f "$f" ] || continue; \
         miss=$(LD_LIBRARY_PATH="$d:/opt/rocm/lib" ldd "$f" 2>/dev/null | grep 'not found' | grep -v -E 'libcuda\.so|libnvidia|libhsa-runtime64|libdrm_amdgpu' || true); \
         if [ -n "$miss" ]; then echo "MISSING LIBS in $f"; echo "$miss"; exit 1; fi; \
+        case "${f##*/}" in strata-vision|strata-vision-hip) readers=$((readers + 1)); "$f" --version;; esac; \
       done; \
-      echo "libraries of $d resolve inside this image"; \
+      if [ "$readers" -lt 1 ]; then echo "no picture reader in $d: this image was built without one"; exit 1; fi; \
+      echo "libraries of $d resolve inside this image, and its picture reader starts"; \
     done
 
 WORKDIR /opt/strata
