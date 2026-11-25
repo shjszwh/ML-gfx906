@@ -79,6 +79,11 @@ export STRATA_CMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp"
 
 [upstream Docker documentation](https://github.com/Niko1221/Strata/blob/v0.2.21.1/docs/DOCKER.md).
 
+`docker-compose.example.yaml` starts the Strata engine;
+`docker-compose.hy4.example.yaml` starts the Hy4-Flash engine from the component
+this image carries, and has a one-shot `hy4-info` service that only reads the
+model header and the Vision shard (`strata-hy4 --info`, no server).
+
 ### Pictures
 
 Pictures are on by default and read on the CPU: `strata-vision` needs nothing
