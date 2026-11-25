@@ -15,6 +15,11 @@ ARG CCACHE_MAXSIZE="2G"
 # keeps the ~1-1.4 GB of VRAM for the experts and stays off the GPU reader that
 # upstream checks on no gfx906 card (docs/AMD_HIP.md).
 ARG STRATA_PICTURE_READER="cpu"
+# 1: the image also carries strata-hy4 (the Hy4-Flash engine) as its own component
+# next to strata, the layout upstream's release images use.  0: strata only.  hy4's
+# GPU sources are HIP already, so gfx906 needs the one CMake line the patch carries
+# and no compat layer; the engine is compiled and packaged, not run on a card here.
+ARG STRATA_BUILD_HY4="1"
 
 ############# Base image #############
 FROM ${ROCM_IMAGE} AS rocm_base
@@ -56,6 +61,7 @@ ARG ROCM_ARCH
 ARG CMAKE_HIP_FLAGS
 ARG CCACHE_MAXSIZE
 ARG STRATA_PICTURE_READER
+ARG STRATA_BUILD_HY4
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential cmake ninja-build ccache && \
@@ -94,11 +100,23 @@ CMAKE_HIP_ARGS=(
 # lane reacts to that flag with enable_language(CUDA), which stops configure at
 # "Failed to find nvcc" (src/inkling2/CMakeLists.txt:197, new since v0.2.16).  It is
 # not part of the package, and upstream's own Dockerfile.src has the same switch.
+# strata-hy4 is a second component, not a second image; its GPU sources are HIP, so
+# the patch only keeps them from being handed to nvcc (engine/CMakeLists.txt:968).
+case "$STRATA_BUILD_HY4" in
+0|1) ;;
+*)
+  echo "STRATA_BUILD_HY4 must be 1 or 0 (got '$STRATA_BUILD_HY4')" >&2
+  exit 1
+  ;;
+esac
+hy4=OFF
+[ "$STRATA_BUILD_HY4" = "1" ] && hy4=ON
 cmake -S engine -B build -G Ninja \
   "${CMAKE_HIP_ARGS[@]}" \
   -DSTRATA_HIP_GFX906=ON \
   -DSTRATA_ENABLE_HIP=OFF \
   -DSTRATA_BUILD_INKLING=OFF \
+  -DSTRATA_BUILD_HY4="$hy4" \
   -DSTRATA_BUILD_TESTS=OFF
 
 # tools/packaging/engine_targets.sh answers "strata strata_kq" even where ninja
@@ -106,6 +124,15 @@ cmake -S engine -B build -G Ninja \
 targets="strata"
 if grep -qE '^build [^:]*libstrata_kq\.so' build/build.ninja 2>/dev/null; then
   targets="strata strata_kq"
+fi
+# The Hy4-Flash engine: its own program and its own component (strata-hy4), built
+# only when this configure asked for it.
+if [ "$hy4" = "ON" ]; then
+  grep -qE '^build [^:]*strata-hy4: ' build/build.ninja 2>/dev/null || {
+    echo "STRATA_BUILD_HY4=1 but the build graph has no strata-hy4 target" >&2
+    exit 1
+  }
+  targets="$targets strata-hy4"
 fi
 echo "engine targets: $targets"
 cmake --build build --target $targets --parallel "$(nproc)"
@@ -182,6 +209,29 @@ python3 tools/packaging/package_engine.py \
   --allow-lib libhipblaslt.so.1 \
   --allow-lib librocblas.so.5 \
   --allow-lib libamdhip64.so.7
+
+# The Hy4-Flash engine as its own component (strata_control/shape_engine.py:
+# --shape hy4 names the program strata-hy4, skips the picture reader and the
+# hipBLASLt checks, and writes "shape": "hy4" into the manifest).  It carries the
+# same ROCm libraries as the engine, so no tuning table and no reader go with it.
+if [ "$hy4" = "ON" ]; then
+  [ -x build/strata-hy4 ] || { echo "STRATA_BUILD_HY4=1 but build/strata-hy4 is missing" >&2; exit 1; }
+  mkdir -p /stage-hy4
+  cp build/strata-hy4 /stage-hy4/
+  cat > /stage-hy4/BUILD.json <<JSON
+{"version": "${version:-dev}", "source": "docker build", "archs": "$ROCM_ARCH", "shape": "hy4"}
+JSON
+  cat /stage-hy4/BUILD.json
+  python3 tools/packaging/package_engine.py \
+    --src /stage-hy4 --backend hip --arch "$ROCM_ARCH" --shape hy4 \
+    --version "${version:-dev}" --variant "${ROCM_ARCH}-hy4" \
+    --out /out/components/engine \
+    --build-id "$(cat SOURCE_COMMIT 2>/dev/null || echo unknown)" \
+    --allow-lib libhipblas.so.3 \
+    --allow-lib libhipblaslt.so.1 \
+    --allow-lib librocblas.so.5 \
+    --allow-lib libamdhip64.so.7
+fi
 EOF_DOCKERFILE
 
 ############# Copy and install all #############
@@ -209,19 +259,21 @@ RUN set -eux; \
     bin/strata --version
 
 # The component manifest hashes, every library of the programs resolves against
-# the package or the base image's ROCm, and the picture reader this image was
-# built with is in the package and starts.
+# the package or the base image's ROCm, and the programs start: the engine's
+# picture reader (the one this image was built with), and strata-hy4 where the
+# package is the Hy4-Flash component, which carries no reader by design.
 RUN set -e; \
     for d in /opt/strata/components/engine/*/; do \
       echo "== $d"; \
-      PYTHONPATH=/opt/strata/terminal /opt/strata/terminal/python/bin/python3 -c 'import sys; from pathlib import Path; from strata_control import engine_component as ec; ec.verify(ec.read_manifest(Path(sys.argv[1])), full=True)' "$d"; \
-      readers=0; \
-      for f in "$d"strata "$d"strata-vision "$d"strata-vision-hip; do \
+      PYTHONPATH=/opt/strata/terminal /opt/strata/terminal/python/bin/python3 -c 'import sys; from pathlib import Path; from strata_control import engine_component as ec; ec.verify(ec.read_manifest_any(Path(sys.argv[1])), full=True)' "$d"; \
+      readers=0; hy4=0; \
+      for f in "$d"strata "$d"strata-hy4 "$d"strata-vision "$d"strata-vision-hip; do \
         [ -f "$f" ] || continue; \
         miss=$(LD_LIBRARY_PATH="$d:/opt/rocm/lib" ldd "$f" 2>/dev/null | grep 'not found' | grep -v -E 'libcuda\.so|libnvidia|libhsa-runtime64|libdrm_amdgpu' || true); \
         if [ -n "$miss" ]; then echo "MISSING LIBS in $f"; echo "$miss"; exit 1; fi; \
-        case "${f##*/}" in strata-vision|strata-vision-hip) readers=$((readers + 1)); "$f" --version;; esac; \
+        case "${f##*/}" in strata-vision|strata-vision-hip) readers=$((readers + 1)); "$f" --version;; strata-hy4) hy4=1; "$f" --version;; esac; \
       done; \
+      if [ "$hy4" = "1" ]; then echo "libraries of $d resolve inside this image, and strata-hy4 starts"; continue; fi; \
       if [ "$readers" -lt 1 ]; then echo "no picture reader in $d: this image was built without one"; exit 1; fi; \
       echo "libraries of $d resolve inside this image, and its picture reader starts"; \
     done

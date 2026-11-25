@@ -49,6 +49,9 @@ jobs:
       # cpu: the component carries the CPU picture reader (what a card under
       # 24 GB of VRAM uses by default), gpu: strata-vision-hip, both: the two.
       STRATA_PICTURE_READER: "cpu"
+      # 1: the image carries strata-hy4 (the Hy4-Flash engine) as its own component
+      # next to strata; 0: strata only, when hy4 keeps the build from finishing.
+      STRATA_BUILD_HY4: "1"
       STRATA_FORCE_BUILD: "${{ inputs.force_build && '1' || '0' }}"
     steps:
       - name: Checkout repo

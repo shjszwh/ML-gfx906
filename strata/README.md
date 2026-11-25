@@ -1,8 +1,8 @@
 # Strata gfx906
 
 [Strata](https://github.com/Niko1221/Strata) inference image for AMD `gfx906`.
-The engine and a picture reader are built from source into the image; model
-weights are downloaded separately.
+The engine, the Hy4-Flash engine and a picture reader are built from source into
+the image; model weights are downloaded separately.
 
 ## Build
 
@@ -30,9 +30,27 @@ architectures the Terminal accepts, both of them fixes from the
 `cudaDeviceGetP2PAttribute`, `cudaDeviceP2PAttr`,
 `cudaDevP2PAttrNativeAtomicSupported` and `cudaDeviceGetPCIBusId`, which the
 peer-access code added after `v0.2.16` uses
-(`engine/src/core/peer_experts.cpp`). `build-context/patch/empty.patch` is for a
-release that needs none; a release that needs another one gets a patch file named
-after it and a preset bump.
+(`engine/src/core/peer_experts.cpp`). It also keeps `strata-hy4`'s GPU sources
+(`*.hip.cpp`, HIP code already) from being handed to nvcc on gfx906: with
+`STRATA_HIP_GFX906` the `STRATA_ENABLE_CUDA` flag that selects them would pick
+`LANGUAGE CUDA` (`engine/CMakeLists.txt:968`). `build-context/patch/empty.patch`
+is for a release that needs none; a release that needs another one gets a patch
+file named after it and a preset bump.
+
+## Hy4-Flash engine
+
+`STRATA_BUILD_HY4=1` (the default) builds `strata-hy4` next to `strata` and
+packages it as its own component (`0.1.68-…-hip-gfx906-hy4`,
+`package_engine.py --shape hy4`), which is the layout upstream's release images
+use. `0` builds and ships `strata` alone.
+
+The engine is built, packaged and start-checked (`strata-hy4 --version` in the
+image); it has **not** been run on a gfx906 card, so the wave64 code paths
+(`HY4_DEV_WMMA` is 0 there, `HY4_HAVE_SDOT4` is 1; `engine/src/hy4flash/run/hy4_gpu.h`)
+are compiled but unverified. Run it with `strata-hy4 --gpus 0,1` as
+[`docs/AMD_HIP.md`](https://github.com/Niko1221/Strata/blob/v0.2.21.1/docs/AMD_HIP.md#hy4-flash-experts-on-multiple-amd-gpus)
+describes. A package with no picture reader is what a shape component gets, so
+the image's component check starts `strata-hy4` instead of requiring a reader.
 
 `STRATA_PICTURE_READER` picks the reader the component carries:
 

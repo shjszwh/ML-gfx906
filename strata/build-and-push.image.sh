@@ -18,6 +18,7 @@ source ../.build/build-common.sh
 : "${STRATA_CCACHE_MAXSIZE:="2G"}"
 : "${STRATA_PATCH:="v0.2.21.1.patch"}"
 : "${STRATA_PICTURE_READER:="cpu"}"
+: "${STRATA_BUILD_HY4:="1"}"
 : "${STRATA_IS_RELEASE:="0"}"
 : "${STRATA_PUSH:="1"}"
 : "${STRATA_PRESET_NAME:="${STRATA_BRANCH}-rocm-${STRATA_ROCM_VERSION}"}"
@@ -55,6 +56,7 @@ function build {
   print INFO "STRATA_COMMIT:   ${STRATA_COMMIT}"
   print INFO "STRATA_PATCH:    ${STRATA_PATCH}"
   print INFO "PICTURE_READER:  ${STRATA_PICTURE_READER}"
+  print INFO "BUILD_HY4:       ${STRATA_BUILD_HY4}"
   print INFO "ROCM_ARCH:       ${ROCM_ARCH}"
   print INFO "ROCM_VERSION:    ${STRATA_ROCM_VERSION}"
   print INFO "CMAKE_HIP_FLAGS: ${STRATA_CMAKE_HIP_FLAGS}"
@@ -79,6 +81,7 @@ function build {
     --build-arg STRATA_COMMIT="${STRATA_COMMIT}"
     --build-arg STRATA_PATCH="${STRATA_PATCH}"
     --build-arg STRATA_PICTURE_READER="${STRATA_PICTURE_READER}"
+    --build-arg STRATA_BUILD_HY4="${STRATA_BUILD_HY4}"
     --build-arg CMAKE_HIP_FLAGS="${STRATA_CMAKE_HIP_FLAGS}"
     --build-arg CCACHE_MAXSIZE="${STRATA_CCACHE_MAXSIZE}"
     --progress plain
