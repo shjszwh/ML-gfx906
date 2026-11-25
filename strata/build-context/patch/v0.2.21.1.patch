@@ -1,12 +1,13 @@
 diff --git a/engine/include/strata/platform/hip_compat/strata_hip.h b/engine/include/strata/platform/hip_compat/strata_hip.h
-index ee9b22599..6885bcb7d 100644
+index ee9b22599..d55092174 100644
 --- a/engine/include/strata/platform/hip_compat/strata_hip.h
 +++ b/engine/include/strata/platform/hip_compat/strata_hip.h
-@@ -98,6 +98,9 @@ inline hipError_t strata_device_get_attribute(int* v, hipDeviceAttribute_t a, in
+@@ -98,6 +98,10 @@ inline hipError_t strata_device_get_attribute(int* v, hipDeviceAttribute_t a, in
  #define cudaDeviceCanAccessPeer hipDeviceCanAccessPeer
  #define cudaDeviceEnablePeerAccess hipDeviceEnablePeerAccess
  #define cudaDeviceDisablePeerAccess hipDeviceDisablePeerAccess
 +#define cudaDeviceGetP2PAttribute hipDeviceGetP2PAttribute
++#define cudaDeviceP2PAttr hipDeviceP2PAttr
 +#define cudaDevP2PAttrNativeAtomicSupported hipDevP2PAttrNativeAtomicSupported
 +#define cudaDeviceGetPCIBusId hipDeviceGetPCIBusId
  #define cudaDeviceGetStreamPriorityRange hipDeviceGetStreamPriorityRange

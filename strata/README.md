@@ -27,8 +27,9 @@ The current preset is Strata `v0.2.21.1`, built with
 stream-priority aliases the gfx906 build uses and lists `gfx906` in the
 architectures the Terminal accepts, both of them fixes from the
 `shjszwh/mi50-Strata` fork, so the patch carries only what is still missing:
-`cudaDeviceGetP2PAttribute`, `cudaDevP2PAttrNativeAtomicSupported` and
-`cudaDeviceGetPCIBusId`, which the peer-access code added after `v0.2.16` uses
+`cudaDeviceGetP2PAttribute`, `cudaDeviceP2PAttr`,
+`cudaDevP2PAttrNativeAtomicSupported` and `cudaDeviceGetPCIBusId`, which the
+peer-access code added after `v0.2.16` uses
 (`engine/src/core/peer_experts.cpp`). `build-context/patch/empty.patch` is for a
 release that needs none; a release that needs another one gets a patch file named
 after it and a preset bump.
@@ -68,14 +69,13 @@ from the ROCm runtime, takes no VRAM from the experts (the GPU reader keeps abou
 
 - `VISION=cpu` (or `strata launch --vision cpu`) forces the CPU reader;
   `VISION=off` turns pictures off; `VISION=on` takes the Terminal's default.
-- The reader weights (`mmproj`, about 0.9 GB) must be in the model folder given as
-  `MODEL_PATH`, and their name must match the family: `qwen` reads
-  `mmproj-Qwen3.8-Flash-Next-BF16.gguf`, `swift` reads
-  `mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf`, and Unsloth's `mmproj-F16.gguf` is
-  accepted as an alternative. Setup stops with `is missing` instead of
-  downloading when the files are given (a read-only mount), so a
-  `looks like swift ..., not qwen` warning at start means the family and the
-  `mmproj` name disagree.
+- The reader weights (`mmproj`, about 0.9 GB) are the family's pinned projector
+  (`terminal/strata_control/pictures.py`): families `qwen`, `coder`, `unsloth` and
+  `gyro` read `mmproj-Qwen3.8-Flash-Next-BF16.gguf`, family `swift` reads
+  `mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf`. A copy of that same file under
+  another name, in the model folder or the folder above it, is accepted (same
+  size, then the pinned SHA-256 is checked); a projector of another model is not
+  used, whatever its name is, and pictures stay off for it.
 - The CPU reader is built for an AVX2 baseline (its kernels pick a tier at run
   time), so the machine must be Haswell or newer. An older CPU needs
   `-DSTRATA_PORTABLE=OFF -DSTRATA_ISA_FLOOR=avx` on the CPU build in the
