@@ -3,7 +3,7 @@
 ARG ROCM_IMAGE="docker.io/mixa3607/rocm-gfx906:10.1-complete"
 ARG ROCM_ARCH="gfx906"
 ARG STRATA_REPO="https://github.com/Niko1221/Strata.git"
-ARG STRATA_BRANCH="v0.2.16"
+ARG STRATA_BRANCH="v0.2.21.1"
 ARG STRATA_COMMIT=""
 ARG STRATA_PATCH="empty.patch"
 ARG CMAKE_HIP_FLAGS=""

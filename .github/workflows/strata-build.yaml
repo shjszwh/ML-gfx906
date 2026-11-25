@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       strata_tag:
-        description: "Strata tag to build (empty = the latest Strata release, resolved when the run starts). A tag such as v0.2.16; the image preset v0.2.16-rocm-10.1 is not a Strata ref."
+        description: "Strata tag to build (empty = the latest Strata release, resolved when the run starts). A tag such as v0.2.21.1; the image preset v0.2.21.1-rocm-10.1 is not a Strata ref."
         required: false
         default: ""
       force_build:
@@ -36,10 +36,12 @@ jobs:
       STRATA_ROCM_VERSION: "${{ matrix.build.rocm_version }}"
       # Empty input: "Resolve build parameters" asks the GitHub API for the latest
       # Strata release and builds that tag, so a new upstream release is picked up
-      # without a commit here (the patch below stays the one for v0.2.16, so a
-      # release that moves the tree again fails until this workflow is updated).
+      # without a commit here. Since v0.2.17 upstream carries both fixes gfx906
+      # needed (the stream-priority aliases and gfx906 in the Terminal's AMD
+      # architectures), so no patch applies; a release that breaks the build again
+      # needs a patch file here and a preset bump.
       STRATA_BRANCH: "${{ inputs.strata_tag }}"
-      STRATA_PATCH: "v0.2.16.patch"
+      STRATA_PATCH: "empty.patch"
       # Empty: the gfx906 build was built and checked without the scheduling
       # flag; set it to "-mllvm -amdgpu-sched-strategy=max-ilp" to A/B it.
       STRATA_CMAKE_HIP_FLAGS: ""

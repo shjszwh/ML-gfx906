@@ -11,11 +11,16 @@ Requires Docker Buildx and a ROCm base image that still ships gfx906 kernels
 `docker.io/mixa3607/rocm-gfx906:10.1-complete`.
 
 The recipe is the gfx906 source build of
-[`docs/AMD_HIP.md`](https://github.com/Niko1221/Strata/blob/v0.2.16/docs/AMD_HIP.md):
+[`docs/AMD_HIP.md`](https://github.com/Niko1221/Strata/blob/v0.2.21.1/docs/AMD_HIP.md):
 `-DSTRATA_HIP_GFX906=ON` on `engine/`, a reader from `terminal/tools/vision`,
 both packaged with `tools/packaging/package_engine.py`.
-`build-context/patch/v0.2.16.patch` adds the two HIP stream-priority aliases the
-compat layer still misses and `gfx906` to the architectures the Terminal accepts.
+
+The current preset is Strata `v0.2.21.1` and needs no patch: since `v0.2.17`
+upstream maps the two HIP stream-priority aliases the gfx906 build uses and lists
+`gfx906` in the architectures the Terminal accepts, both of them fixes from the
+`shjszwh/mi50-Strata` fork. `build-context/patch/` keeps only `empty.patch`, which
+`STRATA_PATCH` defaults to; a later release that breaks the build again needs a
+patch file named after it and a preset bump.
 
 `STRATA_PICTURE_READER` picks the reader the component carries:
 
@@ -32,11 +37,6 @@ card under 24 GB of VRAM, and gfx906 cards are 16 GB (MI50, Radeon VII) or 32 GB
 `Pictures could not be switched on` line), so the CPU reader is required, not
 optional, and the build fails when the reader it was asked for is missing.
 
-That first hunk is an upstream fix sent as a pull request (branch
-`fix/gfx906-stream-priority` of the `shjszwh/mi50-Strata` fork). Once upstream
-takes it, `v0.2.16.patch` stops applying and the build fails on it rather than
-building without the arch hunk, so the patch needs a revision at that point.
-
 Log in to the destination registry and run from this directory:
 
 ```bash
@@ -47,7 +47,7 @@ export STRATA_CMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp"
 
 ## Run
 
-[upstream Docker documentation](https://github.com/Niko1221/Strata/blob/v0.2.16/docs/DOCKER.md).
+[upstream Docker documentation](https://github.com/Niko1221/Strata/blob/v0.2.21.1/docs/DOCKER.md).
 
 ### Pictures
 
