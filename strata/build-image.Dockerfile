@@ -89,11 +89,16 @@ CMAKE_HIP_ARGS=(
 )
 
 # The engine: the gfx906 source build of docs/AMD_HIP.md (wave64 compat layer,
-# STRATA_HIP_GFX906, no wave32 HIP backend).
+# STRATA_HIP_GFX906, no wave32 HIP backend).  strata-inkling is off: STRATA_HIP_GFX906
+# forces STRATA_ENABLE_CUDA on (every .cu is compiled as HIP) and inkling2's CUDA
+# lane reacts to that flag with enable_language(CUDA), which stops configure at
+# "Failed to find nvcc" (src/inkling2/CMakeLists.txt:197, new since v0.2.16).  It is
+# not part of the package, and upstream's own Dockerfile.src has the same switch.
 cmake -S engine -B build -G Ninja \
   "${CMAKE_HIP_ARGS[@]}" \
   -DSTRATA_HIP_GFX906=ON \
   -DSTRATA_ENABLE_HIP=OFF \
+  -DSTRATA_BUILD_INKLING=OFF \
   -DSTRATA_BUILD_TESTS=OFF
 
 # tools/packaging/engine_targets.sh answers "strata strata_kq" even where ninja

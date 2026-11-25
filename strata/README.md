@@ -15,6 +15,13 @@ The recipe is the gfx906 source build of
 `-DSTRATA_HIP_GFX906=ON` on `engine/`, a reader from `terminal/tools/vision`,
 both packaged with `tools/packaging/package_engine.py`.
 
+`engine/` is configured with `-DSTRATA_BUILD_INKLING=OFF`: `STRATA_HIP_GFX906`
+forces `STRATA_ENABLE_CUDA` on (every `.cu` is compiled as HIP) and the
+`src/inkling2` subproject, new after `v0.2.16` and on by default, reacts to that
+flag with `enable_language(CUDA)` and stops configure at `Failed to find nvcc`.
+The image does not package `strata-inkling`, and upstream's own
+`tools/docker/Dockerfile.src` exposes the same switch as `BUILD_INKLING`.
+
 The current preset is Strata `v0.2.21.1` and needs no patch: since `v0.2.17`
 upstream maps the two HIP stream-priority aliases the gfx906 build uses and lists
 `gfx906` in the architectures the Terminal accepts, both of them fixes from the
