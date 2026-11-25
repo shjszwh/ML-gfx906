@@ -22,12 +22,16 @@ flag with `enable_language(CUDA)` and stops configure at `Failed to find nvcc`.
 The image does not package `strata-inkling`, and upstream's own
 `tools/docker/Dockerfile.src` exposes the same switch as `BUILD_INKLING`.
 
-The current preset is Strata `v0.2.21.1` and needs no patch: since `v0.2.17`
-upstream maps the two HIP stream-priority aliases the gfx906 build uses and lists
-`gfx906` in the architectures the Terminal accepts, both of them fixes from the
-`shjszwh/mi50-Strata` fork. `build-context/patch/` keeps only `empty.patch`, which
-`STRATA_PATCH` defaults to; a later release that breaks the build again needs a
-patch file named after it and a preset bump.
+The current preset is Strata `v0.2.21.1`, built with
+`build-context/patch/v0.2.21.1.patch`. Since `v0.2.17` upstream maps the two HIP
+stream-priority aliases the gfx906 build uses and lists `gfx906` in the
+architectures the Terminal accepts, both of them fixes from the
+`shjszwh/mi50-Strata` fork, so the patch carries only what is still missing:
+`cudaDeviceGetP2PAttribute`, `cudaDevP2PAttrNativeAtomicSupported` and
+`cudaDeviceGetPCIBusId`, which the peer-access code added after `v0.2.16` uses
+(`engine/src/core/peer_experts.cpp`). `build-context/patch/empty.patch` is for a
+release that needs none; a release that needs another one gets a patch file named
+after it and a preset bump.
 
 `STRATA_PICTURE_READER` picks the reader the component carries:
 

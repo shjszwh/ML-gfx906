@@ -36,12 +36,13 @@ jobs:
       STRATA_ROCM_VERSION: "${{ matrix.build.rocm_version }}"
       # Empty input: "Resolve build parameters" asks the GitHub API for the latest
       # Strata release and builds that tag, so a new upstream release is picked up
-      # without a commit here. Since v0.2.17 upstream carries both fixes gfx906
-      # needed (the stream-priority aliases and gfx906 in the Terminal's AMD
-      # architectures), so no patch applies; a release that breaks the build again
-      # needs a patch file here and a preset bump.
+      # without a commit here. Since v0.2.17 upstream carries the two fixes gfx906
+      # needed first (the stream-priority aliases and gfx906 in the Terminal's AMD
+      # architectures); the patch below adds the three peer-access names v0.2.21.1
+      # still misses. A release that moves the tree again needs a patch file here,
+      # re-checked with STRATA_FORCE_BUILD=1, and a preset bump.
       STRATA_BRANCH: "${{ inputs.strata_tag }}"
-      STRATA_PATCH: "empty.patch"
+      STRATA_PATCH: "v0.2.21.1.patch"
       # Empty: the gfx906 build was built and checked without the scheduling
       # flag; set it to "-mllvm -amdgpu-sched-strategy=max-ilp" to A/B it.
       STRATA_CMAKE_HIP_FLAGS: ""

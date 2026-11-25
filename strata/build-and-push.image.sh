@@ -16,7 +16,7 @@ source ../.build/build-common.sh
 : "${STRATA_COMMIT:=""}"
 : "${STRATA_CMAKE_HIP_FLAGS:=""}"
 : "${STRATA_CCACHE_MAXSIZE:="2G"}"
-: "${STRATA_PATCH:="empty.patch"}"
+: "${STRATA_PATCH:="v0.2.21.1.patch"}"
 : "${STRATA_PICTURE_READER:="cpu"}"
 : "${STRATA_IS_RELEASE:="0"}"
 : "${STRATA_PUSH:="1"}"
